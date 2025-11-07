@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: player_segments
+    description: Player segmentation based on engagement, level, and activity
+    columns:
+      - name: player_id
+        description: Unique player identifier
+        tests:
+          - unique
+          - not_null
+      - name: engagement_segment
+        description: High/Medium/Low engagement classification
+      - name: level_segment
+        description: Player progression segment
+      - name: activity_segment
+        description: Recent activity classification
+
+  - name: churn_analysis
+    description: Churn metrics aggregated by various segments
+    columns:
+      - name: total_players
+        description: Number of players in this segment
+      - name: churned_players
+        description: Number of churned players
+      - name: churn_rate
+        description: Percentage of players who churned

@@ -1,0 +1,13 @@
+wow_analytics:
+  outputs:
+    dev:
+      type: duckdb
+      path: '../wow_test.duckdb'
+      schema: 'main'
+      threads: 1
+    prod:
+      type: duckdb
+      path: '../wow.duckdb'
+      schema: 'main'
+      threads: 1
+  target: dev  # Default to dev to protect production

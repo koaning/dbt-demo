@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: stg_wowlogs_with_sessions
+    description: Raw wowlogs with session IDs assigned (30-minute inactivity threshold)
+    columns:
+      - name: player_id
+        description: Unique player identifier
+        tests:
+          - not_null
+      - name: session_id
+        description: Unique identifier for each player session (player_id-session_number)
+        tests:
+          - not_null
+      - name: datetime
+        description: Timestamp of the event
+        tests:
+          - not_null
+
+  - name: player_session_stats
+    description: Session statistics per player for bot detection
+    columns:
+      - name: player_id
+        description: Unique player identifier
+        tests:
+          - unique
+          - not_null
+      - name: max_session_duration_minutes
+        description: Maximum session duration in minutes (used for bot detection)
+        tests:
+          - not_null
+      - name: is_likely_bot
+        description: Flag indicating likely bot (1) or human player (0)
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+
+  - name: stg_wowlogs_no_bots
+    description: Raw wowlogs with bot accounts filtered out
+    columns:
+      - name: player_id
+        description: Unique player identifier (bots excluded)
+        tests:
+          - not_null
+      - name: session_id
+        description: Unique identifier for each player session
+        tests:
+          - not_null
+
+  - name: stg_players
+    description: Player-level aggregated features (bot-filtered)
+    columns:
+      - name: player_id
+        description: Unique player identifier
+        tests:
+          - unique
+          - not_null
