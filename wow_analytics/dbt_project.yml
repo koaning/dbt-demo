@@ -29,6 +29,10 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   wow_analytics:
     staging:
+      # Default to view for staging models
       +materialized: view
-    analytics:
-      +materialized: table
+      # But materialize these specific models as tables for performance
+      player_session_stats:
+        +materialized: table
+      stg_wowlogs_no_bots:
+        +materialized: table

@@ -34,7 +34,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [0, 1]
+              arguments:
+                values: [0, 1]
 
   - name: stg_wowlogs_no_bots
     description: Raw wowlogs with bot accounts filtered out

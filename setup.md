@@ -12,13 +12,12 @@ wow_analytics/
 │
 ├── models/                 # SQL models (transformations)
 │   ├── sources.yml         # Defines source tables from wow.duckdb
-│   ├── staging/
-│   │   ├── stg_players.sql    # Staging view
-│   │   └── schema.yml         # Tests for staging models
-│   └── analytics/
-│       ├── player_segments.sql    # Player segmentation table
-│       ├── churn_analysis.sql     # Churn metrics table
-│       └── schema.yml             # Tests for analytics models
+│   └── staging/
+│       ├── stg_wowlogs_with_sessions.sql  # Add session IDs (view)
+│       ├── player_session_stats.sql       # Bot detection (table)
+│       ├── stg_wowlogs_no_bots.sql        # Filtered logs (table)
+│       ├── stg_players.sql                # Player aggregates (view)
+│       └── schema.yml                     # Tests for staging models
 │
 ├── analyses/               # Ad-hoc analytical queries (not materialized)
 │   └── .gitkeep
@@ -132,15 +131,11 @@ wowlogs (raw)
     ↓
 stg_wowlogs_with_sessions (view) ← Add session IDs
     ↓
-player_session_stats (table) ← Calculate session metrics
+player_session_stats (table) ← Calculate session metrics & detect bots
     ↓
 stg_wowlogs_no_bots (table) ← Filter out bots
     ↓
 stg_players (view) ← Aggregate to player level
-    ↓
-player_segments (table) ← Segment players
-    ↓
-churn_analysis (table) ← Analyze churn by segment
 ```
 
 ## Current Models
@@ -156,9 +151,13 @@ Adds session IDs to raw event logs:
 #### 2. player_session_stats (table)
 Session statistics per player for bot detection:
 - **Metrics**: Max/avg/median session duration, events per session, total sessions
-- **Bot detection**: Flags players with sessions > 12 hours or avg session > 6 hours
-- **Output**: One row per player with `is_likely_bot` flag
+- **Bot detection heuristics**:
+  - `likely_bot_long_session`: Max session > 12 hours (720 minutes)
+  - `likely_bot_avg_session`: Avg session > 6 hours (360 minutes)
+  - `is_likely_bot`: Combined flag (either heuristic triggers)
+- **Output**: One row per player with bot flags and session metrics
 - **Result**: Detected 4,119 bots (4.5% of players accounting for 60% of events)
+- **Tuning**: Adjust thresholds in `player_session_stats.sql` if needed
 
 #### 3. stg_wowlogs_no_bots (table)
 Clean event logs with bots filtered out:
@@ -172,21 +171,7 @@ Player-level aggregated features (bot-filtered):
 - Counts active days, locations visited, and sessions
 - Determines churn status (no activity in 30+ days)
 - Tracks most recent class, race, and guild
-
-### Analytics Layer
-
-#### 5. player_segments (table)
-Segments players into cohorts:
-- **Engagement**: High/Medium/Low based on days active and locations
-- **Level**: Max Level (80+), Advanced (60+), Intermediate (40+), Beginner
-- **Activity**: Active This Week/Month, Recently Inactive, Long Inactive
-
-#### 6. churn_analysis (table)
-Aggregated churn metrics by segment:
-- Total players and churn rate per segment
-- Average days active, locations visited, and max level
-- Grouped by class, race, and all segment types
-- Filtered to segments with 5+ players
+- **Use case**: Clean player data ready for analysis or further modeling
 
 ## Common Commands
 
@@ -261,23 +246,80 @@ dbt run --select player_segments --target prod
 
 ```bash
 # Using DuckDB CLI (if installed)
-duckdb wow_test.duckdb "SELECT * FROM main.churn_analysis LIMIT 10"
+duckdb wow_test.duckdb "SELECT * FROM main.stg_players LIMIT 10"
 
 # Or using Python
-python -c "import duckdb; print(duckdb.connect('wow_test.duckdb').execute('SELECT * FROM main.churn_analysis LIMIT 10').df())"
+python -c "import duckdb; print(duckdb.connect('wow_test.duckdb').execute('SELECT * FROM main.stg_players LIMIT 10').df())"
 
 # Read-only mode (prevents accidental writes)
-python -c "import duckdb; print(duckdb.connect('wow_test.duckdb', read_only=True).execute('SELECT * FROM main.churn_analysis LIMIT 10').df())"
+python -c "import duckdb; print(duckdb.connect('wow_test.duckdb', read_only=True).execute('SELECT * FROM main.stg_players LIMIT 10').df())"
+```
+
+### Useful Queries
+
+**Bot detection statistics:**
+```sql
+SELECT
+    is_likely_bot,
+    count(*) as num_players,
+    round(avg(max_session_duration_minutes), 2) as avg_max_session
+FROM main.player_session_stats
+GROUP BY is_likely_bot;
+```
+
+**Top bots by session length:**
+```sql
+SELECT
+    player_id,
+    max_session_duration_minutes / 60.0 as max_session_hours,
+    total_sessions,
+    total_events
+FROM main.player_session_stats
+WHERE is_likely_bot = 1
+ORDER BY max_session_duration_minutes DESC
+LIMIT 10;
+```
+
+**Session analysis for a specific player:**
+```sql
+SELECT
+    session_id,
+    min(datetime) as session_start,
+    max(datetime) as session_end,
+    count(*) as events_in_session,
+    datediff('minute', min(datetime), max(datetime)) as duration_minutes
+FROM main.stg_wowlogs_with_sessions
+WHERE player_id = 83
+GROUP BY session_id
+ORDER BY session_start;
+```
+
+**Data quality metrics:**
+```sql
+SELECT
+    'Original events' as metric,
+    count(*) as value
+FROM wowlogs
+UNION ALL
+SELECT
+    'Events after bot removal',
+    count(*)
+FROM main.stg_wowlogs_no_bots
+UNION ALL
+SELECT
+    'Percentage of events from bots',
+    round(100.0 * (1 - count(*)::float / (SELECT count(*) FROM wowlogs)), 2)
+FROM main.stg_wowlogs_no_bots;
 ```
 
 ### Production Database (wow.duckdb)
 
 ```bash
 # Using DuckDB CLI (if installed)
-duckdb wow.duckdb "SELECT * FROM main.churn_analysis LIMIT 10"
+duckdb wow.duckdb "SELECT * FROM main.stg_players LIMIT 10"
 
 # Or using Python (read-only recommended)
-python -c "import duckdb; print(duckdb.connect('wow.duckdb', read_only=True).execute('SELECT * FROM main.churn_analysis LIMIT 10').df())"
+python -c "import duckdb; print(duckdb.connect('wow.duckdb', read_only=True).execute('SELECT * FROM main.stg_players LIMIT 10').df())"
 ```
 
 ### Comparing Environments
@@ -289,11 +331,17 @@ import duckdb
 dev_conn = duckdb.connect('wow_test.duckdb', read_only=True)
 prod_conn = duckdb.connect('wow.duckdb', read_only=True)
 
-# Compare row counts
-dev_count = dev_conn.execute('SELECT COUNT(*) FROM main.churn_analysis').fetchone()[0]
-prod_count = prod_conn.execute('SELECT COUNT(*) FROM main.churn_analysis').fetchone()[0]
+# Compare player counts
+dev_count = dev_conn.execute('SELECT COUNT(*) FROM main.stg_players').fetchone()[0]
+prod_count = prod_conn.execute('SELECT COUNT(*) FROM main.stg_players').fetchone()[0]
 
-print(f"Dev: {dev_count} rows, Prod: {prod_count} rows")
+print(f"Dev: {dev_count} players, Prod: {prod_count} players")
+
+# Compare bot detection
+dev_bots = dev_conn.execute('SELECT COUNT(*) FROM main.player_session_stats WHERE is_likely_bot = 1').fetchone()[0]
+prod_bots = prod_conn.execute('SELECT COUNT(*) FROM main.player_session_stats WHERE is_likely_bot = 1').fetchone()[0]
+
+print(f"Bots detected - Dev: {dev_bots}, Prod: {prod_bots}")
 ```
 
 ## DuckDB-Specific Notes

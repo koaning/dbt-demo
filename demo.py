@@ -28,7 +28,7 @@ def _():
 def _(engine, mo):
     _df = mo.sql(
         f"""
-        SELECT * FROM churn_analysis LIMIT 100
+        SELECT * FROM stg_players LIMIT 100
         """,
         engine=engine
     )
