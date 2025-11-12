@@ -1,0 +1,1 @@
+There is an `init.py` notebook in the `notebooks` folder that can initialize the duckdb file. I also asked Claude to add some markdown files with extra context and how this might be set up from scratch. 
